@@ -84,6 +84,8 @@ int main(int i_argc, char **ppsz_argv)
     unsigned long int packets=0;
     while (!feof(inputfile) && !ferror(inputfile)) {
         uint8_t p_ts[TS_SIZE];
+        uint8_t p_aux[TS_SIZE];
+        memset(p_aux, 0xFF, TS_SIZE);
         size_t i_ret = fread(p_ts, TS_SIZE, 1, inputfile);
         if (i_ret != 1) {
         	WARN("Can't read input ts");
@@ -91,9 +93,22 @@ int main(int i_argc, char **ppsz_argv)
         }
         if (ts_validate(p_ts)) {
             if(offset >= 0 &&  ts_get_pid(p_ts)==pid) {
-            	if(i_last_cc > 0 && (0x0f & (i_last_cc+1)) != ts_get_cc(p_ts)) {
-            		WARN("TS Discontinuity");
-            	}
+                if(i_last_cc >= 0 && (0x0f & (i_last_cc+1)) != ts_get_cc(p_ts)) {
+                        uint8_t current = ts_get_cc(p_ts);
+                        uint8_t last = 0x0f & i_last_cc;
+                        int     missed = (current > last) ? current-last-1 : current+16-last-1;
+//                        WARN("TS Discontinuity (missed:%i; current:%i; last:%i)", missed, current, last);
+                        WARN("TS Discontinuity (missed:%i)", missed);
+                        do {
+                               size_t o_ret = fwrite(p_aux+offset+TS_HEADER_SIZE, TS_SIZE-(offset+TS_HEADER_SIZE), 1, outputfile);
+                               if (o_ret != 1) {
+                                        WARN("Can't write to output file");
+                                        break;
+                               }
+                               packets++;
+                               missed--;
+                        } while (missed>0);
+                }
             	i_last_cc = ts_get_cc(p_ts);
             	uint8_t *payload;
                 if(ts_get_transporterror(p_ts)) {
@@ -113,7 +128,7 @@ int main(int i_argc, char **ppsz_argv)
 
             	size_t o_ret = fwrite(payload, p_ts+TS_SIZE-payload, 1, outputfile);
                 if (o_ret != 1) {
-                	WARN("Can't write output ts");
+                	WARN("Can't write to output file");
                 	break;
                 }
                 packets++;
@@ -126,7 +141,7 @@ int main(int i_argc, char **ppsz_argv)
 
             	size_t o_ret = fwrite(payload, p_ts+TS_SIZE-payload, 1, outputfile);
                 if (o_ret != 1) {
-                	WARN("Can't write output ts");
+                	WARN("Can't write to output file");
                 	break;
                 }
                 packets++;
