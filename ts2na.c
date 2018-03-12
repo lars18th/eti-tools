@@ -17,27 +17,30 @@
  *****************************************************************************/
 static void usage(const char *psz)
 {
-    fprintf(stderr, "usage: %s [-p pid] [-s offset] [-i <inputfile>] [-o <outputfile>]\n", psz);
+    fprintf(stderr, "usage: %s [-p pid] [-s offset] [-i <inputfile>] [-o <outputfile>] [-v]\n", psz);
+    fprintf(stderr, "       -v: encapsulated bitstream is ETI-NI (V.11), instead of default ETI-NA (G.704)");
     exit(EXIT_FAILURE);
 }
-    
+
 int main(int i_argc, char **ppsz_argv)
-{   
+{
     int c;
     FILE *inputfile=stdin;
     FILE *outputfile=stdout;
     int offset=12, pid=0x0426;
     int i_last_cc = -1;
-    
+    int eti_mode = 0;  // 0:ETI-NA(G.704); 1:ETI-NI(V.11); 2:ETI-NI(G.703)??
+
     static const struct option long_options[] = {
         { "pid",           required_argument, NULL, 'p' },
-        { "offset",            required_argument,       NULL, 's' },
-        { "input",         required_argument,       NULL, 'i' },
-        { "output",          required_argument,       NULL, 'o' },
+        { "offset",        required_argument, NULL, 's' },
+        { "input",         required_argument, NULL, 'i' },
+        { "output",        required_argument, NULL, 'o' },
+        { "v11",           no_argument      , NULL, 'v' },
         { 0, 0, 0, 0 }
     };
-    
-    while ((c = getopt_long(i_argc, ppsz_argv, "p:s:i:o:h", long_options, NULL)) != -1)
+
+    while ((c = getopt_long(i_argc, ppsz_argv, "p:s:i:o:vh", long_options, NULL)) != -1)
     {
         switch (c) {
         case 'p':
@@ -72,6 +75,9 @@ int main(int i_argc, char **ppsz_argv)
             }
             break;
 
+        case 'v':
+            eti_mode = 1;
+            break;
 
         case 'h':
         default:
@@ -81,6 +87,7 @@ int main(int i_argc, char **ppsz_argv)
 
 
     INFO("Using pid: 0x%04x (%d)", pid, pid);
+    INFO("Using output format: %s", eti_mode? "ETI-NI(V.11)" : "ETI-NA(G.704)");
     unsigned long int packets=0;
     while (!feof(inputfile) && !ferror(inputfile)) {
         uint8_t p_ts[TS_SIZE];
