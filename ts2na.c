@@ -8,9 +8,10 @@
 
 #define DEBUG(format, ...) fprintf (stderr, "DEBUG: "format"\n", ## __VA_ARGS__)
 #define  INFO(format, ...) fprintf (stderr, "INFO:  "format"\n", ## __VA_ARGS__)
-#define WARN(format, ...)  fprintf (stderr, "WARN:  "format"\n", ## __VA_ARGS__)
+#define  WARN(format, ...) fprintf (stderr, "WARN:  "format"\n", ## __VA_ARGS__)
 #define ERROR(format, ...) fprintf (stderr, "ERROR: "format"\n", ## __VA_ARGS__)
 
+#define ETI_SIZE  6144
 
 /*****************************************************************************
  * Main loop
@@ -18,7 +19,7 @@
 static void usage(const char *psz)
 {
     fprintf(stderr, "usage: %s [-p pid] [-s offset] [-i <inputfile>] [-o <outputfile>] [-v]\n", psz);
-    fprintf(stderr, "       -v: encapsulated bitstream is ETI-NI (V.11), instead of default ETI-NA (G.704)");
+    fprintf(stderr, "       -v: encapsulated bitstream is ETI-NI (V.11), instead of default ETI-NA (G.704)\n");
     exit(EXIT_FAILURE);
 }
 
@@ -27,6 +28,9 @@ int main(int i_argc, char **ppsz_argv)
     int c;
     FILE *inputfile=stdin;
     FILE *outputfile=stdout;
+    char outchunk[ETI_SIZE+TS_SIZE];
+    char* out_p;
+    int startchunk = -1;
     int offset=12, pid=0x0426;
     int i_last_cc = -1;
     int eti_mode = 0;  // 0:ETI-NA(G.704); 1:ETI-NI(V.11); 2:ETI-NI(G.703)??
@@ -77,6 +81,7 @@ int main(int i_argc, char **ppsz_argv)
 
         case 'v':
             eti_mode = 1;
+            offset = 4;
             break;
 
         case 'h':
@@ -85,10 +90,17 @@ int main(int i_argc, char **ppsz_argv)
         }
     }
 
+    if (eti_mode == 1 && offset != 4) {
+        ERROR("ETI-NI(V.11) is incompatible with 'offset'");
+        exit(1);
+    }
 
     INFO("Using pid: 0x%04x (%d)", pid, pid);
     INFO("Using output format: %s", eti_mode? "ETI-NI(V.11)" : "ETI-NA(G.704)");
-    unsigned long int packets=0;
+
+    unsigned long int packetsin=0;
+    unsigned long int packetsout=0;
+    out_p = outchunk;
     while (!feof(inputfile) && !ferror(inputfile)) {
         uint8_t p_ts[TS_SIZE];
         size_t i_ret = fread(p_ts, TS_SIZE, 1, inputfile);
@@ -118,12 +130,11 @@ int main(int i_argc, char **ppsz_argv)
                 	break;
             	}
 
-            	size_t o_ret = fwrite(payload, p_ts+TS_SIZE-payload, 1, outputfile);
-                if (o_ret != 1) {
-                	WARN("Can't write output ts");
-                	break;
-                }
-                packets++;
+                memcpy(out_p, payload, p_ts+TS_SIZE-payload);
+                out_p += p_ts+TS_SIZE-payload;
+
+                packetsin++;
+
             } else if(offset < 0) {
             	uint8_t *payload = &p_ts[TS_HEADER_SIZE + offset];
             	if(p_ts+TS_SIZE < payload || p_ts > payload) {
@@ -131,14 +142,27 @@ int main(int i_argc, char **ppsz_argv)
                 	break;
             	}
 
-            	size_t o_ret = fwrite(payload, p_ts+TS_SIZE-payload, 1, outputfile);
+                memcpy(out_p, payload, p_ts+TS_SIZE-payload);
+                out_p += p_ts+TS_SIZE-payload;
+
+                packetsin++;
+            }
+
+            if (out_p-outchunk >= ETI_SIZE) {
+                size_t o_ret = fwrite(outchunk, ETI_SIZE, 1, outputfile);
                 if (o_ret != 1) {
-                	WARN("Can't write output ts");
-                	break;
+                      WARN("Can't write to output");
+                      break;
+                } else {
+                      packetsout++;
+                      out_p -= ETI_SIZE;
+                      if (out_p != outchunk) {
+                          memmove(outchunk, outchunk+ETI_SIZE, out_p-outchunk);
+                      }
                 }
-                packets++;
             }
         } else {
+            WARN("TS SYNC lost");
             do {
                 memmove(p_ts, &p_ts[1], TS_SIZE-1);
                 size_t i_ret = fread(&p_ts[TS_SIZE-1], 1, 1, inputfile);
@@ -150,10 +174,18 @@ int main(int i_argc, char **ppsz_argv)
         }
     }
 
-    if(packets){
-    	INFO("Successfully read %ld ts-packets", packets);
+    if(packetsin){
+    	INFO("Successfully read %ld ts-packets", packetsin);
+    	INFO("Successfully writed %ld ETI-packets", packetsout);
     }
 
+//flushOut:
+    if (out_p > outchunk) {
+        size_t o_ret = fwrite(outchunk, out_p-outchunk, 1, outputfile);
+        if (o_ret != 1) {
+              WARN("Can't write to output");
+        }
+    }
 
 //mainErr:
     fclose(inputfile);
