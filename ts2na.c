@@ -109,7 +109,8 @@ int main(int i_argc, char **ppsz_argv)
         	break;
         }
         if (ts_validate(p_ts)) {
-            if(offset >= 0 &&  ts_get_pid(p_ts)==pid) {
+            if(offset >= 0 && ts_get_pid(p_ts)==pid) {
+                if(eti_mode == 1 && startchunk < 0 && !(ts_get_unitstart(p_ts) && !ts_get_transporterror(p_ts))) continue; // When ETI-NI(V.11) start to process only with the first PUSI packet comes (without errors)
             	if(i_last_cc > 0 && (0x0f & (i_last_cc+1)) != ts_get_cc(p_ts)) {
             		WARN("TS Discontinuity");
             	}
